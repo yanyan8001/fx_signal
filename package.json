@@ -1,0 +1,13 @@
+{
+  "name": "fx-signal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FXシグナル通知のサーバー側(GitHub Actionsで実行)",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "check": "node server/check.mjs"
+  },
+  "dependencies": {
+    "web-push": "3.6.7"
+  }
+}

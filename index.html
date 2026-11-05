@@ -1,0 +1,583 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#0d131a"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style></head><body>
+<title>FXシグナル通知</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+/* Layout: one narrow column. Header with status, three tabs (watchlist / history / settings). Each watched pair is a row card: price, signal pill, indicator states, sparkline. */
+:root{
+  --bg:#edf0f4; --surface:#ffffff; --surface2:#e3e8ee; --fg:#14202b; --muted:#566574; --line:#d3dae2;
+  --accent:#2a53c7; --accent-fg:#ffffff;
+  --buy:#0b7a6c; --buy-bg:#d7efeb; --sell:#c0432d; --sell-bg:#f8ddd6;
+  --warn:#7c5700; --warn-bg:#f5e9c6; --info-bg:#dfe7f8;
+  --font-ui:'Zen Kaku Gothic New','Hiragino Kaku Gothic ProN','Hiragino Sans','Yu Gothic',system-ui,sans-serif;
+  --font-num:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0d131a; --surface:#16202a; --surface2:#1f2b37; --fg:#e6edf3; --muted:#94a3b1; --line:#2a3846;
+    --accent:#8aa9ff; --accent-fg:#0d131a;
+    --buy:#4fd1bd; --buy-bg:#12332e; --sell:#ff8d76; --sell-bg:#3a1f19;
+    --warn:#e8c55c; --warn-bg:#382f10; --info-bg:#1b2a4a;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0d131a; --surface:#16202a; --surface2:#1f2b37; --fg:#e6edf3; --muted:#94a3b1; --line:#2a3846;
+  --accent:#8aa9ff; --accent-fg:#0d131a;
+  --buy:#4fd1bd; --buy-bg:#12332e; --sell:#ff8d76; --sell-bg:#3a1f19;
+  --warn:#e8c55c; --warn-bg:#382f10; --info-bg:#1b2a4a;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-ui);font-size:15px;line-height:1.6;
+  padding-block:16px 28px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.app{max-width:720px;margin-inline:auto;display:flex;flex-direction:column;gap:14px}
+h1,h2,h3,p{margin:0}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.top>div{min-width:0}
+h1{font-size:1.35rem;font-weight:700;letter-spacing:.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:.82rem;margin-top:2px}
+.num{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.btn{font:inherit;font-weight:500;font-size:.88rem;border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:8px 14px;border-radius:8px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--surface2)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn:disabled{opacity:.55;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.banner{padding:10px 12px;border-radius:8px;font-size:.84rem;background:var(--info-bg);color:var(--fg)}
+.banner.warn{background:var(--warn-bg);color:var(--warn)}
+.banner.err{background:var(--sell-bg);color:var(--sell)}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);background:var(--surface2);border-radius:10px;padding:3px;gap:3px}
+.tab{font:inherit;font-size:.9rem;font-weight:500;border:0;background:transparent;color:var(--muted);padding:8px 4px;border-radius:8px;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.stack{display:flex;flex-direction:column;gap:10px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.pair{display:flex;align-items:baseline;gap:10px;min-width:0;flex-wrap:wrap}
+.pair h2{font-family:var(--font-num);font-size:1.05rem;font-weight:500}
+.price{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:1.15rem}
+.chg{font-family:var(--font-num);font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.pill{display:inline-block;font-size:.8rem;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.pill.buy{background:var(--buy-bg);color:var(--buy)}
+.pill.sell{background:var(--sell-bg);color:var(--sell)}
+.pill.none{background:var(--surface2);color:var(--muted);font-weight:500}
+.detail{font-size:.82rem;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:.76rem;padding:2px 8px;border-radius:6px;background:var(--surface2);color:var(--muted);font-family:var(--font-num)}
+.spark{width:100%;height:auto;display:block}
+.spark .l{fill:none;stroke:var(--accent);stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
+.spark .m{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3;opacity:.8}
+.spark .d{fill:var(--accent)}
+.err-line{font-size:.82rem;color:var(--sell)}
+.empty{color:var(--muted);padding:22px 8px;text-align:center;font-size:.9rem}
+.hlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.hrow{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.hrow .t{font-size:.76rem;color:var(--muted);text-align:right}
+.hrow .main{min-width:0}
+.hrow .main strong{font-family:var(--font-num);font-weight:500}
+.small{font-size:.78rem;color:var(--muted)}
+form{display:flex;flex-direction:column;gap:16px}
+fieldset{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:12px 14px 14px;margin:0;min-width:0;display:flex;flex-direction:column;gap:10px}
+legend{font-size:.82rem;font-weight:700;color:var(--muted);padding:0 6px;letter-spacing:.04em}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.opt{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:.88rem;cursor:pointer}
+.opt input{accent-color:var(--accent);width:16px;height:16px;margin:0}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:.84rem;font-weight:500}
+.field input[type=password],.field input[type=text],.field select,.field textarea{font:inherit;font-size:.92rem;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);width:100%;min-width:0}
+.field textarea{font-family:var(--font-num);font-size:.74rem;line-height:1.45;word-break:break-all;resize:vertical}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.hint{font-size:.78rem;color:var(--muted)}
+.hint.warn{color:var(--warn)}
+.foot{font-size:.76rem;color:var(--muted);text-align:center;padding-top:6px}
+#toast{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;pointer-events:none;
+  padding:12px max(16px,env(safe-area-inset-left,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+#toast div{pointer-events:auto;max-width:520px;width:100%;background:var(--fg);color:var(--bg);padding:11px 14px;border-radius:10px;font-size:.88rem;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+@media (prefers-reduced-motion:no-preference){#toast div{animation:up .18s ease-out}@keyframes up{from{transform:translateY(8px);opacity:0}}}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div>
+      <h1>FXシグナル通知</h1>
+      <p class="sub" id="status">読み込み中</p>
+    </div>
+    <button class="btn primary" id="btnRefresh" type="button">今すぐ更新</button>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <nav class="tabs" role="tablist" aria-label="表示切り替え">
+    <button class="tab" role="tab" id="tab-watch" data-tab="watch" aria-selected="true" type="button">ウォッチ</button>
+    <button class="tab" role="tab" id="tab-history" data-tab="history" aria-selected="false" type="button">履歴</button>
+    <button class="tab" role="tab" id="tab-settings" data-tab="settings" aria-selected="false" type="button">設定</button>
+  </nav>
+
+  <section id="view-watch" class="stack" aria-labelledby="tab-watch"></section>
+
+  <section id="view-history" hidden aria-labelledby="tab-history">
+    <ul class="hlist" id="hlist"></ul>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="btnClear" type="button">履歴を消す</button>
+    </div>
+  </section>
+
+  <section id="view-settings" hidden aria-labelledby="tab-settings">
+    <form id="settings" onsubmit="return false">
+      <fieldset>
+        <legend>データ</legend>
+        <div class="row">
+          <label class="opt" for="mode-demo"><input type="radio" name="mode" id="mode-demo" value="demo">デモ(架空のレート)</label>
+          <label class="opt" for="mode-live"><input type="radio" name="mode" id="mode-live" value="live">ライブ(Twelve Data)</label>
+        </div>
+        <div class="field">
+          <label for="apiKey">Twelve Data APIキー</label>
+          <input type="password" id="apiKey" name="apiKey" autocomplete="off" placeholder="twelvedata.com で無料登録して取得">
+          <span class="hint">キーはこの端末のブラウザにだけ保存されます。</span>
+        </div>
+        <div class="grid2">
+          <div class="field">
+            <label for="tf">時間足</label>
+            <select id="tf" name="tf"><option value="15min">15分足</option><option value="1h">1時間足</option><option value="4h">4時間足</option></select>
+          </div>
+          <div class="field">
+            <label for="poll">チェック間隔</label>
+            <select id="poll" name="poll"><option value="5">5分ごと</option><option value="15">15分ごと</option><option value="30">30分ごと</option><option value="60">60分ごと</option></select>
+          </div>
+        </div>
+        <p class="hint" id="reqHint"></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>監視する通貨ペア</legend>
+        <div class="row" id="pairBox"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>シグナルの条件</legend>
+        <div class="row">
+          <label class="opt" for="ind-ma"><input type="checkbox" id="ind-ma" name="ind" value="ma">移動平均クロス(9/21)</label>
+          <label class="opt" for="ind-macd"><input type="checkbox" id="ind-macd" name="ind" value="macd">MACD(12/26/9)</label>
+          <label class="opt" for="ind-rsi"><input type="checkbox" id="ind-rsi" name="ind" value="rsi">RSI(14)</label>
+          <label class="opt" for="ind-bb"><input type="checkbox" id="ind-bb" name="ind" value="bb">ボリンジャー(20, 2σ)</label>
+        </div>
+        <div class="grid2">
+          <div class="field">
+            <label for="minStrength">必要な強度</label>
+            <select id="minStrength" name="minStrength"><option value="1">1つの指標で通知</option><option value="2">2つ以上が同方向</option><option value="3">3つ以上が同方向</option><option value="4">4つすべてが同方向</option></select>
+          </div>
+          <div class="field">
+            <label for="win">判定する直近の足</label>
+            <select id="win" name="win"><option value="1">最新の1本</option><option value="2">直近2本</option><option value="3">直近3本</option><option value="5">直近5本</option></select>
+          </div>
+        </div>
+        <p class="hint">強度は、買いまたは売りの転換を示した指標の数です。強度を上げると通知は減り、ダマシも減りやすくなります。</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>通知</legend>
+        <div class="row">
+          <button class="btn" type="button" id="btnNotify">通知を許可する</button>
+          <button class="btn" type="button" id="btnTest">テスト通知</button>
+        </div>
+        <p class="hint" id="notifyHint"></p>
+        <p class="hint">このページを開いている間は、ここで判定して通知します。閉じている間の通知は、下のサーバー連携で届けます。</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>閉じていても通知(サーバー連携)</legend>
+        <p class="hint">GitHub Actionsが15分ごとにレートを確認し、新しいシグナルをこの端末へ送ります。公開したHTTPSのURLでこのアプリを開いて操作してください。iPhoneはホーム画面に追加したアプリから操作します。</p>
+        <div class="row"><button class="btn primary" type="button" id="btnPush">プッシュ通知を準備する</button></div>
+        <p class="hint" id="pushHint"></p>
+        <div class="field" id="cfgBox" hidden>
+          <label for="serverCfg">GitHubのSecret「FX_CONFIG」に貼る文字列</label>
+          <textarea id="serverCfg" readonly rows="5"></textarea>
+          <div class="row"><button class="btn" type="button" id="btnCopyCfg">コピー</button></div>
+          <p class="hint warn">この文字列には、APIキーとプッシュ用の秘密鍵が入っています。GitHubのSecret以外には貼らないでください。通貨ペアや条件を変えたときは、コピーし直してSecretを更新します。</p>
+        </div>
+      </fieldset>
+    </form>
+  </section>
+
+  <p class="foot">シグナルはテクニカル指標による機械的な判定です。投資の助言ではありません。取引はご自身の判断で行ってください。</p>
+</div>
+<div id="toast" aria-live="polite"></div>
+
+<script>
+/*CORE-START*/
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function hashStr(s){var h=2166136261;for(var i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function gauss(r){var u=0,v=0;while(!u)u=r();while(!v)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+var TF_MS={'15min':900000,'1h':3600000,'4h':14400000};
+var BASE={'USD/JPY':153.2,'EUR/JPY':166.4,'GBP/JPY':195.1,'AUD/JPY':99.6,'EUR/USD':1.0862,'GBP/USD':1.2741};
+var DEC={'USD/JPY':3,'EUR/JPY':3,'GBP/JPY':3,'AUD/JPY':3,'EUR/USD':5,'GBP/USD':5};
+var DEMO_SALT=189;
+
+function sma(v,n){var o=new Array(v.length).fill(null),s=0;for(var i=0;i<v.length;i++){s+=v[i];if(i>=n)s-=v[i-n];if(i>=n-1)o[i]=s/n;}return o;}
+function ema(v,n){var o=new Array(v.length).fill(null),k=2/(n+1),prev=null;for(var i=0;i<v.length;i++){if(i===n-1){var s=0;for(var j=0;j<n;j++)s+=v[j];prev=s/n;o[i]=prev;}else if(i>=n){prev=v[i]*k+prev*(1-k);o[i]=prev;}}return o;}
+function rsi(v,n){n=n||14;var o=new Array(v.length).fill(null);if(v.length<=n)return o;var g=0,l=0,i,d;for(i=1;i<=n;i++){d=v[i]-v[i-1];if(d>=0)g+=d;else l-=d;}g/=n;l/=n;o[n]=l===0?100:100-100/(1+g/l);for(i=n+1;i<v.length;i++){d=v[i]-v[i-1];g=(g*(n-1)+(d>0?d:0))/n;l=(l*(n-1)+(d<0?-d:0))/n;o[i]=l===0?100:100-100/(1+g/l);}return o;}
+function macd(v){var e12=ema(v,12),e26=ema(v,26);var line=v.map(function(_,i){return e12[i]!==null&&e26[i]!==null?e12[i]-e26[i]:null;});var first=line.findIndex(function(x){return x!==null;});var sig=new Array(v.length).fill(null);if(first>=0){var part=line.slice(first),s=ema(part,9);for(var i=0;i<part.length;i++)sig[first+i]=s[i];}var hist=line.map(function(x,i){return x!==null&&sig[i]!==null?x-sig[i]:null;});return{line:line,sig:sig,hist:hist};}
+function bb(v,n,k){n=n||20;k=k||2;var m=sma(v,n),up=[],lo=[];for(var i=0;i<v.length;i++){if(m[i]===null){up.push(null);lo.push(null);continue;}var s=0;for(var j=i-n+1;j<=i;j++)s+=(v[j]-m[i])*(v[j]-m[i]);var sd=Math.sqrt(s/n);up.push(m[i]+k*sd);lo.push(m[i]-k*sd);}return{mid:m,up:up,lo:lo};}
+
+var IND_NAME={ma:'移動平均クロス',macd:'MACD',rsi:'RSI',bb:'ボリンジャー'};
+function analyze(closes,cfg){
+  var n=closes.length;
+  var f=sma(closes,9),s=sma(closes,21),m=macd(closes),r=rsi(closes,14),b=bb(closes,20,2);
+  var ev=[],from=Math.max(1,n-cfg.window);
+  for(var i=from;i<n;i++){
+    if(cfg.ind.ma&&f[i]!==null&&s[i]!==null&&f[i-1]!==null&&s[i-1]!==null){
+      if(f[i-1]<=s[i-1]&&f[i]>s[i])ev.push({ind:'ma',dir:1,idx:i});
+      if(f[i-1]>=s[i-1]&&f[i]<s[i])ev.push({ind:'ma',dir:-1,idx:i});
+    }
+    if(cfg.ind.macd&&m.hist[i]!==null&&m.hist[i-1]!==null){
+      if(m.hist[i-1]<=0&&m.hist[i]>0)ev.push({ind:'macd',dir:1,idx:i});
+      if(m.hist[i-1]>=0&&m.hist[i]<0)ev.push({ind:'macd',dir:-1,idx:i});
+    }
+    if(cfg.ind.rsi&&r[i]!==null&&r[i-1]!==null){
+      if(r[i-1]<30&&r[i]>=30)ev.push({ind:'rsi',dir:1,idx:i});
+      if(r[i-1]>70&&r[i]<=70)ev.push({ind:'rsi',dir:-1,idx:i});
+    }
+    if(cfg.ind.bb&&b.lo[i]!==null&&b.lo[i-1]!==null){
+      if(closes[i-1]<b.lo[i-1]&&closes[i]>=b.lo[i])ev.push({ind:'bb',dir:1,idx:i});
+      if(closes[i-1]>b.up[i-1]&&closes[i]<=b.up[i])ev.push({ind:'bb',dir:-1,idx:i});
+    }
+  }
+  function uniq(d){var set={};ev.forEach(function(e){if(e.dir===d)set[e.ind]=1;});return Object.keys(set);}
+  var bi=uniq(1),si=uniq(-1),signal=null;
+  if(bi.length>si.length&&bi.length>=cfg.minStrength)signal={dir:1,strength:bi.length,inds:bi};
+  else if(si.length>bi.length&&si.length>=cfg.minStrength)signal={dir:-1,strength:si.length,inds:si};
+  if(signal){signal.idx=Math.max.apply(null,ev.filter(function(e){return e.dir===signal.dir;}).map(function(e){return e.idx;}));}
+  var L=n-1,c=closes[L];
+  var states={
+    ma:f[L]!==null&&s[L]!==null?(f[L]>s[L]?1:-1):0,
+    macd:m.hist[L]!==null?(m.hist[L]>=0?1:-1):0,
+    rsi:r[L],
+    bb:b.up[L]===null?0:(c>b.up[L]?-1:(c<b.lo[L]?1:0))
+  };
+  return{signal:signal,states:states,slow:s,events:ev};
+}
+
+function demoStep(st,t){
+  if(st.left<=0){st.drift=gauss(st.rng)*st.vol*0.6;st.left=14+Math.floor(st.rng()*26);}
+  st.left--;
+  var o=st.price,c=o+st.drift+gauss(st.rng)*st.vol;
+  var h=Math.max(o,c)+Math.abs(gauss(st.rng))*st.vol*0.4,l=Math.min(o,c)-Math.abs(gauss(st.rng))*st.vol*0.4;
+  st.price=c;st.bars.push({t:t,o:o,h:h,l:l,c:c});if(st.bars.length>200)st.bars.shift();
+}
+function demoNew(pair,tf,now){
+  var rng=mulberry32(hashStr(pair)+DEMO_SALT),ms=TF_MS[tf],base=BASE[pair];
+  var st={rng:rng,ms:ms,price:base,drift:0,left:0,bars:[],vol:base*0.00045};
+  var last=Math.floor(now/ms)*ms;
+  for(var i=119;i>=0;i--)demoStep(st,last-i*ms);
+  return st;
+}
+/*CORE-END*/
+
+(function(){
+'use strict';
+var $=function(id){return document.getElementById(id);};
+var esc=function(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});};
+var mem={};
+function load(k,d){try{var v=localStorage.getItem(k);if(v)return JSON.parse(v);}catch(e){}return (k in mem)?mem[k]:d;}
+function save(k,v){mem[k]=v;try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+
+var DEFAULTS={mode:'demo',apiKey:'',tf:'15min',poll:15,pairs:['USD/JPY','EUR/JPY','EUR/USD'],ind:{ma:true,macd:true,rsi:true,bb:true},minStrength:2,window:3,notify:false};
+var saved=load('fxs.cfg',{});
+var S={
+  cfg:Object.assign({},DEFAULTS,saved,{ind:Object.assign({},DEFAULTS.ind,saved.ind||{})}),
+  data:{},demo:{},history:load('fxs.hist',[]),seen:load('fxs.seen',[]),
+  last:0,nextAt:0,busy:false,tab:'watch',err:''
+};
+var PAIRS=Object.keys(BASE);
+
+function fmtTime(t){var d=new Date(t);return ('0'+(d.getMonth()+1)).slice(-2)+'/'+('0'+d.getDate()).slice(-2)+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);}
+function fmtClock(t){var d=new Date(t);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);}
+var TF_LABEL={'15min':'15分足','1h':'1時間足','4h':'4時間足'};
+var sleep=function(ms){return new Promise(function(r){setTimeout(r,ms);});};
+
+/* ---------- toast & notification ---------- */
+var toastTimer=null;
+function toast(msg){var el=$('toast');el.innerHTML='<div>'+esc(msg)+'</div>';clearTimeout(toastTimer);toastTimer=setTimeout(function(){el.innerHTML='';},5000);}
+function notifySupported(){return typeof Notification!=='undefined';}
+function notifyState(){return notifySupported()?Notification.permission:'unsupported';}
+async function pushNotice(title,body,tag){
+  toast(title+'  '+body);
+  if(!S.cfg.notify||notifyState()!=='granted')return;
+  try{
+    var reg=null;
+    if(navigator.serviceWorker&&navigator.serviceWorker.getRegistration)reg=await navigator.serviceWorker.getRegistration();
+    if(reg&&reg.showNotification)await reg.showNotification(title,{body:body,tag:tag,icon:'icon-192.png'});
+    else new Notification(title,{body:body,tag:tag});
+  }catch(e){}
+}
+function updateNotifyHint(){
+  var st=notifyState(),el=$('notifyHint'),b=$('btnNotify');
+  var map={granted:'通知は許可されています。',denied:'通知がブロックされています。ブラウザのサイト設定で許可に変更してください。',default:'まだ許可していません。「通知を許可する」を押してください。',unsupported:'この環境は通知に対応していません。画面内の表示だけが使えます。'};
+  el.textContent=map[st]||'';
+  b.disabled=(st==='granted'||st==='denied'||st==='unsupported');
+  b.textContent=st==='granted'?'許可済み':'通知を許可する';
+}
+
+/* ---------- data ---------- */
+async function fetchLive(pair,tf,key){
+  var url='https://api.twelvedata.com/time_series?symbol='+encodeURIComponent(pair)+'&interval='+tf+'&outputsize=120&order=ASC&apikey='+encodeURIComponent(key);
+  var res=await fetch(url);var j=await res.json();
+  if(j.status==='error')throw new Error(j.message||'APIエラー');
+  if(!j.values||!j.values.length)throw new Error('データが空でした');
+  return j.values.map(function(x){return{t:Date.parse(x.datetime.replace(' ','T')+'Z'),o:+x.open,h:+x.high,l:+x.low,c:+x.close};});
+}
+function errText(e){
+  if(e&&e.name==='TypeError')return '通信できませんでした。ネットワークを確認してください。この表示環境が外部サイトへの通信を制限している場合は、配布ファイルをブラウザで開くか、ご自身のサイトに置いて使ってください。';
+  return (e&&e.message)||'不明なエラー';
+}
+function analysisCfg(){return{window:+S.cfg.window,minStrength:+S.cfg.minStrength,ind:S.cfg.ind};}
+function analyzePair(p,quiet){
+  var d=S.data[p];if(!d||!d.bars||d.bars.length<40)return;
+  var res=analyze(d.bars.map(function(b){return b.c;}),analysisCfg());
+  d.res=res;
+  var sg=res.signal;if(!sg)return;
+  var bar=d.bars[sg.idx];
+  var key=p+'|'+S.cfg.tf+'|'+sg.dir+'|'+bar.t;
+  if(S.seen.indexOf(key)>=0)return;
+  S.seen.push(key);if(S.seen.length>300)S.seen.shift();save('fxs.seen',S.seen);
+  var rec={at:Date.now(),pair:p,tf:S.cfg.tf,dir:sg.dir,strength:sg.strength,inds:sg.inds,price:d.bars[d.bars.length-1].c,demo:S.cfg.mode==='demo'};
+  S.history.unshift(rec);if(S.history.length>100)S.history.pop();save('fxs.hist',S.history);
+  if(!quiet){
+    var label=(sg.dir>0?'買い':'売り')+'シグナル '+p;
+    pushNotice(label,TF_LABEL[S.cfg.tf]+'・強度'+sg.strength+'('+sg.inds.map(function(i){return IND_NAME[i];}).join('、')+')','fx-'+p);
+  }
+}
+async function refreshAll(opt){
+  opt=opt||{};
+  if(S.busy)return;
+  S.busy=true;$('btnRefresh').disabled=true;S.err='';
+  try{
+    var cfg=S.cfg;
+    if(cfg.mode==='live'&&!cfg.apiKey){S.err='nokey';return;}
+    for(var i=0;i<cfg.pairs.length;i++){
+      var p=cfg.pairs[i];
+      try{
+        if(cfg.mode==='demo'){
+          var st=S.demo[p],first=!st;
+          if(first){st=S.demo[p]=demoNew(p,cfg.tf,Date.now());}
+          else{demoStep(st,st.bars[st.bars.length-1].t+st.ms);}
+          S.data[p]={bars:st.bars.slice()};
+          analyzePair(p,first&&!!opt.initial);
+        }else{
+          var bars=await fetchLive(p,cfg.tf,cfg.apiKey);
+          var firstLoad=!S.data[p]||!S.data[p].bars;
+          S.data[p]={bars:bars};
+          analyzePair(p,firstLoad);
+          if(i<cfg.pairs.length-1)await sleep(900);
+        }
+      }catch(e){
+        var prev=S.data[p]&&S.data[p].bars?S.data[p].bars:null;
+        S.data[p]={bars:prev,err:errText(e),res:S.data[p]&&S.data[p].res};
+      }
+    }
+    S.last=Date.now();S.nextAt=S.last+cfg.poll*60000;
+  }finally{
+    S.busy=false;$('btnRefresh').disabled=false;render();
+  }
+}
+function reanalyze(){
+  S.cfg.pairs.forEach(function(p){if(S.data[p]&&S.data[p].bars){S.data[p].res=null;analyzePair(p,true);}});
+  render();
+}
+
+/* ---------- render ---------- */
+function spark(closes,slow){
+  var n=Math.min(60,closes.length),a=closes.slice(-n),b=slow.slice(-n);
+  var vals=a.concat(b.filter(function(x){return x!==null;}));
+  var mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals),rg=(mx-mn)||1;
+  var X=function(i){return 2+(i/(n-1))*296;},Y=function(v){return 58-((v-mn)/rg)*54;};
+  var pl=a.map(function(v,i){return X(i).toFixed(1)+','+Y(v).toFixed(1);}).join(' ');
+  var pm='',on=false;
+  b.forEach(function(v,i){if(v===null){on=false;return;}pm+=(on?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1);on=true;});
+  return '<svg class="spark" viewBox="0 0 300 60" role="img" aria-label="直近'+n+'本の終値の推移"><path class="m" d="'+pm+'"/><polyline class="l" points="'+pl+'"/><circle class="d" cx="'+X(n-1).toFixed(1)+'" cy="'+Y(a[n-1]).toFixed(1)+'" r="2.8"/></svg>';
+}
+function chipsHtml(st){
+  var c=[],I=S.cfg.ind;
+  if(I.ma)c.push('MA '+(st.ma>0?'短期&gt;長期':st.ma<0?'短期&lt;長期':'―'));
+  if(I.macd)c.push('MACD '+(st.macd>0?'+':st.macd<0?'−':'―'));
+  if(I.rsi)c.push('RSI '+(st.rsi===null?'―':st.rsi.toFixed(0)));
+  if(I.bb)c.push('BB '+(st.bb>0?'下限割れ':st.bb<0?'上限超え':'帯の中'));
+  return c.map(function(t){return '<span class="chip">'+t+'</span>';}).join('');
+}
+function cardHtml(p){
+  var d=S.data[p];
+  if(!d||!d.bars){
+    return '<article class="card"><div class="card-head"><div class="pair"><h2>'+p+'</h2></div><span class="pill none">'+(d&&d.err?'取得エラー':'読み込み中')+'</span></div>'+(d&&d.err?'<p class="err-line">'+esc(d.err)+'</p>':'')+'</article>';
+  }
+  var bars=d.bars,last=bars[bars.length-1],prev=bars[bars.length-2]||last,dec=DEC[p];
+  var diff=last.c-prev.c,res=d.res,sg=res&&res.signal;
+  var pill=sg?'<span class="pill '+(sg.dir>0?'buy':'sell')+'">'+(sg.dir>0?'▲ 買い':'▼ 売り')+' 強度'+sg.strength+'</span>':'<span class="pill none">様子見</span>';
+  var det='';
+  if(sg){var k=bars.length-1-sg.idx;det='<p class="detail">'+(k===0?'最新の足':k+'本前の足')+'('+fmtTime(bars[sg.idx].t)+') ・ '+sg.inds.map(function(i){return IND_NAME[i];}).join('、')+'</p>';}
+  return '<article class="card"><div class="card-head"><div class="pair"><h2>'+p+'</h2><span class="price">'+last.c.toFixed(dec)+'</span><span class="chg">'+(diff>=0?'+':'−')+Math.abs(diff).toFixed(dec)+'</span></div>'+pill+'</div>'
+    +det+(res?'<div class="chips">'+chipsHtml(res.states)+'</div>'+spark(bars.map(function(b){return b.c;}),res.slow):'')
+    +(d.err?'<p class="err-line">'+esc(d.err)+'</p>':'')+'</article>';
+}
+function renderWatch(){
+  var box=$('view-watch');
+  if(!S.cfg.pairs.length){box.innerHTML='<p class="empty">監視する通貨ペアを設定で選んでください。</p>';return;}
+  box.innerHTML=S.cfg.pairs.map(cardHtml).join('');
+}
+function renderHistory(){
+  var ul=$('hlist');
+  if(!S.history.length){ul.innerHTML='<li class="empty">まだシグナルはありません。条件に合う転換が出ると、ここに記録されます。</li>';return;}
+  ul.innerHTML=S.history.map(function(h){
+    var dec=DEC[h.pair]||3;
+    return '<li class="hrow"><span class="pill '+(h.dir>0?'buy':'sell')+'">'+(h.dir>0?'▲ 買い':'▼ 売り')+'</span>'
+      +'<div class="main"><strong>'+esc(h.pair)+'</strong> <span class="small">'+(TF_LABEL[h.tf]||'')+' ・ 強度'+h.strength+(h.demo?' ・ デモ':'')+'</span><div class="small">'+h.inds.map(function(i){return IND_NAME[i];}).join('、')+'</div></div>'
+      +'<div class="t"><div class="num">'+Number(h.price).toFixed(dec)+'</div>'+fmtTime(h.at)+'</div></li>';
+  }).join('');
+}
+function renderBanner(){
+  var b=$('banner'),c=S.cfg,msg='',cls='banner';
+  if(c.mode==='live'&&!c.apiKey){msg='ライブ表示にはTwelve DataのAPIキーが必要です。設定タブで入力してください。';cls+=' warn';}
+  else if(c.mode==='demo'){msg='デモ表示です。レートは架空のもので、「今すぐ更新」を押すたびに足が1本進みます。実際のレートを見るには、設定でAPIキーを入れてライブに切り替えます。';}
+  else{
+    var errs=c.pairs.filter(function(p){return S.data[p]&&S.data[p].err;});
+    if(errs.length){msg=S.data[errs[0]].err;cls+=' err';}
+  }
+  b.className=cls;b.hidden=!msg;b.textContent=msg;
+}
+function updateStatus(){
+  var c=S.cfg,m=c.mode==='demo'?'デモ':'ライブ';
+  var t=m+' ・ '+TF_LABEL[c.tf];
+  if(S.last){t+=' ・ 最終更新 '+fmtClock(S.last);var rest=Math.max(0,Math.ceil((S.nextAt-Date.now())/60000));t+=' ・ 次回まで約'+rest+'分';}
+  $('status').textContent=t;
+}
+function updateReqHint(){
+  var n=S.cfg.pairs.length,per=Math.round(1440/S.cfg.poll),tot=n*per,el=$('reqHint');
+  el.textContent='ライブ時の目安: '+n+'ペア × 1日'+per+'回 = 約'+tot+'リクエスト(無料枠は1日800)';
+  el.className='hint'+(tot>800?' warn':'');
+}
+function render(){renderBanner();renderWatch();renderHistory();updateStatus();updateReqHint();}
+
+/* ---------- settings ---------- */
+function buildPairBox(){
+  $('pairBox').innerHTML=PAIRS.map(function(p,i){return '<label class="opt" for="pair-'+i+'"><input type="checkbox" id="pair-'+i+'" name="pair" value="'+p+'">'+p+'</label>';}).join('');
+}
+function syncForm(){
+  var c=S.cfg,f=$('settings');
+  $('mode-demo').checked=c.mode==='demo';$('mode-live').checked=c.mode==='live';
+  $('apiKey').value=c.apiKey;$('tf').value=c.tf;$('poll').value=String(c.poll);
+  $('minStrength').value=String(c.minStrength);$('win').value=String(c.window);
+  Array.prototype.forEach.call(f.querySelectorAll('input[name=pair]'),function(el){el.checked=c.pairs.indexOf(el.value)>=0;});
+  Array.prototype.forEach.call(f.querySelectorAll('input[name=ind]'),function(el){el.checked=!!c.ind[el.value];});
+  updateNotifyHint();
+}
+function onSettingsChange(){
+  var f=$('settings'),c=S.cfg;
+  var before=[c.mode,c.tf,c.apiKey,c.pairs.join(',')].join('|');
+  c.mode=$('mode-live').checked?'live':'demo';
+  c.apiKey=$('apiKey').value.trim();c.tf=$('tf').value;c.poll=+$('poll').value;
+  c.minStrength=+$('minStrength').value;c.window=+$('win').value;
+  c.pairs=Array.prototype.filter.call(f.querySelectorAll('input[name=pair]'),function(el){return el.checked;}).map(function(el){return el.value;});
+  c.ind={};Array.prototype.forEach.call(f.querySelectorAll('input[name=ind]'),function(el){c.ind[el.value]=el.checked;});
+  save('fxs.cfg',c);
+  if(!$('cfgBox').hidden)showServerCfg();
+  var after=[c.mode,c.tf,c.apiKey,c.pairs.join(',')].join('|');
+  if(before!==after){
+    S.demo={};S.data={};S.last=0;
+    refreshAll({initial:true});
+  }else{
+    if(S.last)S.nextAt=S.last+c.poll*60000;
+    reanalyze();
+  }
+}
+function setTab(t){
+  S.tab=t;
+  ['watch','history','settings'].forEach(function(k){
+    $('view-'+k).hidden=(k!==t);
+    $('tab-'+k).setAttribute('aria-selected',k===t?'true':'false');
+  });
+}
+
+/* ---------- server push (GitHub Actions) ---------- */
+function b64uToBytes(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';var b=atob(s),o=new Uint8Array(b.length);for(var i=0;i<b.length;i++)o[i]=b.charCodeAt(i);return o;}
+function bytesToB64u(u){var s='';for(var i=0;i<u.length;i++)s+=String.fromCharCode(u[i]);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+async function makeVapid(){
+  var kp=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  var jwk=await crypto.subtle.exportKey('jwk',kp.privateKey);
+  var x=b64uToBytes(jwk.x),y=b64uToBytes(jwk.y),pub=new Uint8Array(65);
+  pub[0]=4;pub.set(x,1);pub.set(y,33);
+  return{publicKey:bytesToB64u(pub),privateKey:jwk.d};
+}
+function pushSupported(){return 'serviceWorker' in navigator&&'PushManager' in window&&notifySupported()&&location.protocol==='https:';}
+function buildServerConfig(){
+  var sub=load('fxs.sub',null),v=load('fxs.vapid',null);
+  if(!sub||!v)return '';
+  var c=S.cfg;
+  return JSON.stringify({apiKey:c.apiKey,tf:c.tf,pairs:c.pairs,ind:c.ind,minStrength:c.minStrength,window:c.window,siteUrl:location.origin+location.pathname,vapid:v,subscription:sub});
+}
+function showServerCfg(){
+  var t=buildServerConfig();if(!t)return;
+  $('serverCfg').value=t;$('cfgBox').hidden=false;
+  $('btnPush').textContent='プッシュ通知を準備し直す';
+  if(!S.cfg.apiKey)$('pushHint').textContent='APIキーが未入力です。「データ」欄に入力してから、この文字列をコピーしてください。';
+}
+async function preparePush(){
+  var hint=$('pushHint');
+  if(!pushSupported()){hint.textContent='この環境ではプッシュ通知を準備できません。公開したHTTPSのURLでアプリを開いてください(iPhoneはホーム画面に追加したアプリから)。';return;}
+  try{
+    var perm=await Notification.requestPermission();
+    updateNotifyHint();
+    if(perm!=='granted'){hint.textContent='通知が許可されませんでした。ブラウザの設定で許可してから、もう一度試してください。';return;}
+    S.cfg.notify=true;save('fxs.cfg',S.cfg);
+    var reg=await navigator.serviceWorker.getRegistration();
+    if(!reg){hint.textContent='サービスワーカーが登録されていません。ページを再読み込みして、もう一度試してください。';return;}
+    await navigator.serviceWorker.ready;
+    var v=load('fxs.vapid',null);
+    if(!v){v=await makeVapid();save('fxs.vapid',v);}
+    var old=await reg.pushManager.getSubscription();
+    if(old)await old.unsubscribe();
+    var sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64uToBytes(v.publicKey)});
+    save('fxs.sub',sub.toJSON());
+    showServerCfg();
+    hint.textContent='準備できました。下の文字列をコピーして、GitHubのSecret「FX_CONFIG」に貼ってください。';
+  }catch(e){hint.textContent='準備に失敗しました: '+((e&&e.message)?e.message:e);}
+}
+
+/* ---------- boot ---------- */
+buildPairBox();syncForm();render();
+document.querySelector('.tabs').addEventListener('click',function(e){var b=e.target.closest('[data-tab]');if(b)setTab(b.getAttribute('data-tab'));});
+$('settings').addEventListener('change',onSettingsChange);
+$('btnRefresh').addEventListener('click',function(){refreshAll({});});
+var clearArmed=false,clearTimer=null;
+$('btnClear').addEventListener('click',function(){
+  var b=$('btnClear');
+  if(!clearArmed){clearArmed=true;b.textContent='もう一度押すと消えます';clearTimer=setTimeout(function(){clearArmed=false;b.textContent='履歴を消す';},4000);return;}
+  clearTimeout(clearTimer);clearArmed=false;b.textContent='履歴を消す';
+  S.history=[];save('fxs.hist',S.history);renderHistory();
+});
+$('btnNotify').addEventListener('click',async function(){
+  if(!notifySupported()){updateNotifyHint();return;}
+  try{var r=await Notification.requestPermission();S.cfg.notify=(r==='granted');save('fxs.cfg',S.cfg);}catch(e){}
+  updateNotifyHint();
+});
+$('btnTest').addEventListener('click',function(){
+  if(notifyState()==='granted'){S.cfg.notify=true;save('fxs.cfg',S.cfg);}
+  pushNotice('テスト通知','FXシグナル通知からの確認メッセージです。','fx-test');
+});
+$('btnPush').addEventListener('click',preparePush);
+$('btnCopyCfg').addEventListener('click',async function(){
+  var ta=$('serverCfg'),b=$('btnCopyCfg');
+  function done(){b.textContent='コピーしました';setTimeout(function(){b.textContent='コピー';},2000);}
+  try{await navigator.clipboard.writeText(ta.value);done();}
+  catch(e){ta.focus();ta.select();try{if(document.execCommand('copy'))done();else b.textContent='選択しました。手動でコピーしてください';}catch(e2){b.textContent='選択しました。手動でコピーしてください';}}
+});
+showServerCfg();
+if(notifyState()==='granted'&&!S.cfg.notify){S.cfg.notify=true;save('fxs.cfg',S.cfg);}
+setInterval(function(){
+  updateStatus();
+  if(S.last&&Date.now()>=S.nextAt&&!S.busy)refreshAll({});
+},30000);
+if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){try{navigator.serviceWorker.register('sw.js').catch(function(){});}catch(e){}}
+refreshAll({initial:true});
+})();
+</script>
+
+</body></html>
