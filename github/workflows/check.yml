@@ -1,1 +1,43 @@
+name: FXシグナル確認
 
+on:
+  schedule:
+    - cron: '*/15 * * * 1-5'
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'テスト通知だけ送る'
+        type: boolean
+        default: false
+
+concurrency:
+  group: fx-check
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install --no-audit --no-fund
+
+      - uses: actions/cache@v4
+        with:
+          path: state
+          key: fx-seen-${{ github.run_id }}
+          restore-keys: fx-seen-
+
+      - name: シグナルを確認して通知
+        run: node server/check.mjs
+        env:
+          FX_CONFIG: ${{ secrets.FX_CONFIG }}
+          TEST_PUSH: ${{ inputs.test && '1' || '' }}
